@@ -386,6 +386,8 @@ k8s_image_pull_policy: IfNotPresent
 # Kubernetes dashboard
 # RBAC required. see docs/getting-started.md for access details.
 dashboard_enabled: false
+dashboard_external_auth: false
+dashboard_insecure_port: false
 
 # Addons which can be enabled
 helm_enabled: false

@@ -49,7 +49,7 @@ spec:
             - -endpoint=0.0.0.0:8081
             - -etcd-endpoints=http://127.0.0.1:2379
         - name: etcd
-          image: "{{ etcd_image_repo }}:{{ netcheck_etcd_image_tag }}"
+          image: "{{ netcheck_etcd_image_repo }}:{{ netcheck_etcd_image_tag }}"
           imagePullPolicy: {{ k8s_image_pull_policy }}
           env:
             - name: ETCD_LOG_LEVEL
