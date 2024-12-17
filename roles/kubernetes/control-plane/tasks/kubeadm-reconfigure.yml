@@ -15,19 +15,19 @@
     - name: "Backup Kubernetes configuration files"
       archive:
         path: /etc/kubernetes/
-        dest: /etc/kubernetes-config-{{ ansible_date_time.date }}.tar.gz
+        dest: /etc/kubernetes/kubernetes-config-{{ ansible_date_time.date }}.tar.gz
         format: gz
     - name: Define variables
       set_fact:
-        kube_reconfig_backup_dir: "/etc/kubernetes/reconfigure-bk"
+        kube_reconfig_dir: "/etc/kubernetes/reconfigure"
         cm_name: "kubeadm-config"
         cm_namespace: "kube-system"
-        kube_reconfig_backup_file: "cm-clusterconfig-{{ lookup('date', '%Y%m%d-%H%M%S') }}.yaml"
-        kube_reconfig_backup_path: "{{ backup_dir }}/{{ backup_file }}"
+        kube_reconfig_file: "cm-clusterconfig-{{ lookup('date', '%Y%m%d-%H%M%S') }}.yaml"
+        kube_reconfig_path: "{{ kube_reconfig_dir }}/{{ kube_reconfig_file }}"
 
     - name: Create backup directory if it doesn't exist
       file:
-        path: "{{ kube_reconfig_backup_dir }}"
+        path: "{{ kube_reconfig_dir }}"
         state: directory
         mode: '0755'
         owner: root
@@ -37,7 +37,7 @@
 
     - name: Perform ConfigMap backup
       command: >
-        kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_backup_path }} &&
+        kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_path }} &&
         kubectl delete cm -n {{ cm_namespace }} {{ cm_name }}
       become: yes
       register: cm_backup
@@ -46,17 +46,17 @@
 - name: Kubeadm | Create reconfigure kubeadm config
   template:
     src: "cluster-configuration-replace.yaml.j2"
-    dest: "{{ kube_reconfig_backup_dir }}/kubeadm-cluster-config-replace.yaml"
+    dest: "{{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
     mode: "0640"
 
 - name: Kubeadm | Create new configmap for ClusterConfiguration
-  command: "kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_backup_dir }}/kubeadm-cluster-config-replace.yaml"
+  command: "kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
   run_once: true
   when: inventory_hostname == first_kube_control_plane
 
 - name: Kubeadm | Prepare ClusterConfiguration manifest
   lineinfile:
-    path: "{{ kube_reconfig_backup_dir }}/kubeadm-cluster-config-replace.yaml"
+    path: "{{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
     line: "{{ item }}"
     create: yes
     loop:
@@ -64,9 +64,9 @@
       - "kind: ClusterConfiguration"
 
 - name: Kubeadm | Write new manifest for kubernetes control plane components
-  command: "kubeadm init phase control-plane all --config {{ kube_reconfig_backup_dir }}/kubeadm-cluster-config-replace.yaml"
+  command: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
   when: kubeadm_already_run.stat.exists
 
 - name: Kubeadm | Reconfigure local etcd
-  command: "kubeadm init phase etcd local --config {{ kube_reconfig_backup_dir }}/kubeadm-cluster-config-replace.yaml"
+  command: "kubeadm init phase etcd local --config {{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
   when: kubeadm_already_run.stat.exists
