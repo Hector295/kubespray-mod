@@ -1,0 +1,127 @@
+---
+- name: Retrieve the status of Kubernetes nodes
+  ansible.builtin.command: kubectl get nodes --no-headers
+  register: kube_nodes
+  changed_when: false
+
+- name: Fail if any Kubernetes node is not Ready
+  ansible.builtin.assert:
+    that:
+      - "all(' Ready ' in item for item in kube_nodes.stdout_lines)"
+    success_msg: "All Kubernetes nodes are in Ready state."
+    fail_msg: "Error: Some Kubernetes nodes are not in Ready state: {{ kube_nodes.stdout_lines }}"
+
+- name: Check api is up
+  uri:
+    url: "https://{{ ip | default(fallback_ips[inventory_hostname]) }}:{{ kube_apiserver_port }}/healthz"
+    validate_certs: false
+  when: first_master_node
+  register: _result
+  retries: 60
+  delay: 5
+  until: _result.status == 200
+  tags: ['reconfigure-cluster']
+
+- name: Check if kubeadm has already run
+  stat:
+    path: "/var/lib/kubelet/config.yaml"
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  register: kubeadm_already_run
+  tags: ['reconfigure-cluster']
+
+- name: "Backup Kubernetes configuration files"
+  archive:
+    path: "{{ kube_config_dir }}"
+    dest: "{{ kube_config_dir }}/kubernetes-config-{{ ansible_date_time.date }}.tar.gz"
+    format: gz
+  tags: ['reconfigure-cluster']
+
+- name: Create backup directory if it doesn't exist
+  file:
+    path: "{{ kube_reconfig_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+    recurse: true
+    become: yes
+  tags: ['reconfigure-cluster']
+
+- name: Perform ConfigMap backup
+  when: first_master_node
+  run_once: true
+  command: >
+    kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_path }} &&
+    kubectl delete cm -n {{ cm_namespace }} {{ cm_name }}
+  become: yes
+  register: cm_backup
+  failed_when: cm_backup.rc != 0
+  tags: ['reconfigure-cluster']
+
+- name: Kubeadm | Create reconfigure kubeadm config
+  template:
+    src: "cluster-configuration-replace.yaml.j2"
+    dest: "{{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+    mode: "0640"
+  tags: ['reconfigure-cluster']
+
+- name: Kubeadm | Create new configmap for ClusterConfiguration
+  command: "kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+  run_once: true
+  when: first_master_node
+  tags: ['reconfigure-cluster']
+
+- name: Reconfigure control-plane
+  when:
+    - kubeadm_already_run.stat.exists
+  tags: ['reconfigure-cluster']
+  block:
+    - name: Kubeadm | Prepare ClusterConfiguration manifest
+      lineinfile:
+        path: "{{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+        line: "{{ item }}"
+        create: yes
+        loop:
+          - "apiVersion: kubeadm.k8s.io/v1beta3"
+          - "kind: ClusterConfiguration"
+
+    - name: Kubeadm | Write new manifest for kubernetes control plane components
+      command: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+
+    - name: Kubeadm | Reconfigure local etcd
+      command: "kubeadm init phase etcd local --config {{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+
+    - name: Delete kube-apiserver pod
+      command: "kubectl delete pod -n kube-system kube-apiserver-{{ ansible_hostname }}"
+      ignore_errors: yes
+
+    - name: Wait for kube-apiserver pod to be running
+      command: "kubectl get pod -n kube-system kube-apiserver-{{ ansible_hostname }} -o jsonpath='{.status.phase}'"
+      register: check_apiserver
+      retries: 10
+      delay: 30
+      until: check_apiserver.stdout == 'Running'
+
+    - name: Delete kube-controller-manager pod
+      command: "kubectl delete pod -n kube-system kube-controller-manager-{{ ansible_hostname }}"
+      ignore_errors: yes
+
+    - name: Wait for kube-controller-manager pod to be running
+      command: "kubectl get pod -n kube-system kube-controller-manager-{{ ansible_hostname }} -o jsonpath='{.status.phase}'"
+      register: check_controller_manager
+      retries: 10
+      delay: 30
+      until: check_controller_manager.stdout == 'Running'
+
+    - name: Delete kube-scheduler pod
+      command: "kubectl delete pod -n kube-system kube-scheduler-{{ ansible_hostname }}"
+      ignore_errors: yes
+
+    - name: Wait for kube-scheduler pod to be running
+      command: "kubectl get pod -n kube-system kube-scheduler-{{ ansible_hostname }} -o jsonpath='{.status.phase}'"
+      register: check_scheduler
+      retries: 10
+      delay: 30
+      until: check_scheduler.stdout == 'Running'

@@ -5,3 +5,9 @@
 - name: Gather facts
   import_playbook: facts.yml
 
+- name: Install the control plane
+  hosts: kube_control_plane
+  gather_facts: false
+  any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
+  roles:
+    - { role: kubernetes/reconfigure-control-plane }
