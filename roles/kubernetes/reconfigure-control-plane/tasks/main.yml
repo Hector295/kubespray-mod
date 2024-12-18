@@ -1,15 +1,26 @@
 ---
-- name: Retrieve the status of Kubernetes nodes
-  ansible.builtin.command: kubectl get nodes --no-headers
-  register: kube_nodes
-  changed_when: false
-
-- name: Fail if any Kubernetes node is not Ready
-  ansible.builtin.assert:
-    that:
-      - "all(' Ready ' in item for item in kube_nodes.stdout_lines)"
-    success_msg: "All Kubernetes nodes are in Ready state."
-    fail_msg: "Error: Some Kubernetes nodes are not in Ready state: {{ kube_nodes.stdout_lines }}"
+- name: Ensure all nodes are in Ready state
+  run_once: true
+  when: action == "upgrade"
+  block:
+  - name: Get all node status
+    raw: "kubectl get nodes --no-headers"
+    register: all_nodes_status
+  - name: Get all node status different than Ready
+    raw: echo "{{ all_nodes_status.stdout }}" | grep -v ' Ready'
+    register: nodes_status
+  - name: Show not ready nodes
+    debug: msg="{{ nodes_status.stdout_lines }}"
+    when: nodes_status.stdout != "\r\n"
+  - name: Confirm Upgrade
+    pause:
+      prompt: "Some workers are not in Ready state, do you want to continue with upgrade? Type 'yes' to continue"
+    register: pause_result
+    when: nodes_status.stdout != "\r\n"
+  - name: Fail if user does not confirm upgrade
+    fail:
+      msg: "Upgrade will not continue"
+    when: pause_result.user_input | default('yes') != 'yes'
 
 - name: Check api is up
   uri:
