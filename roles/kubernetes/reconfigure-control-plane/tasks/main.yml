@@ -57,16 +57,23 @@
     group: root
   tags: ['reconfigure-cluster']
 
-- name: Perform ConfigMap backup
+- name: Backup ConfigMap
   when: first_master_node
   run_once: true
-  command: >
-    kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_path }} &&
-    kubectl delete cm -n {{ cm_namespace }} {{ cm_name }}
+  ansible.builtin.shell: >
+    kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_path }}
   become: yes
   register: cm_backup
   failed_when: cm_backup.rc != 0
-  tags: ['reconfigure-cluster']
+
+- name: Delete ConfigMap
+  when: first_master_node and cm_backup.rc == 0
+  run_once: true
+  ansible.builtin.command: >
+    kubectl delete cm -n {{ cm_namespace }} {{ cm_name }}
+  become: yes
+  register: cm_delete
+  failed_when: cm_delete.rc != 0
 
 - name: Kubeadm | Create reconfigure kubeadm config
   template:
