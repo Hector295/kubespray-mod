@@ -10,4 +10,4 @@
   gather_facts: false
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
   roles:
-    - { role: kubernetes/reconfigure-control-plane }
+    - { role: kubernetes/reconfigure-control-plane, tags: ['reconfigure-cluster'] }
