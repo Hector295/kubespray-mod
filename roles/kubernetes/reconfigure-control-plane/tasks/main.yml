@@ -1,7 +1,6 @@
 ---
 - name: Ensure all nodes are in Ready state
   run_once: true
-  when: action == "upgrade"
   block:
   - name: Get all node status
     raw: "kubectl get nodes --no-headers"
@@ -56,8 +55,6 @@
     mode: '0755'
     owner: root
     group: root
-    recurse: true
-    become: yes
   tags: ['reconfigure-cluster']
 
 - name: Perform ConfigMap backup
