@@ -41,6 +41,10 @@
   register: kubeadm_already_run
   tags: ['reconfigure-cluster']
 
+- name: Set reconfig path
+  set_fact:
+    kube_reconfig_path: "{{ kube_reconfig_dir }}/cm-clusterconfig-{{ now(utc=true, fmt='%Y%m%d-%H%M%S') }}.yaml"
+
 - name: "Backup Kubernetes configuration files"
   archive:
     path: "{{ kube_config_dir }}"
