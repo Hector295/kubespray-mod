@@ -11,5 +11,5 @@
   any_errors_fatal: "{{ any_errors_fatal | default(true) }}"
   roles:
     - { role: kubespray-defaults }
-    - { role: kubernetes/preinstall, tags: preinstall }
+    - { role: kubernetes/control-plane, tags: master }
     - { role: kubernetes/reconfigure-control-plane, tags: ['reconfigure-cluster'] }
