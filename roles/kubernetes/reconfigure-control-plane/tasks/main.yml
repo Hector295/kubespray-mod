@@ -102,9 +102,9 @@
         path: "{{ kube_reconfig_path }}"
         line: "{{ item }}"
         create: yes
-        loop:
-          - "apiVersion: kubeadm.k8s.io/v1beta3"
-          - "kind: ClusterConfiguration"
+      loop:
+        - "apiVersion: kubeadm.k8s.io/v1beta3"
+        - "kind: ClusterConfiguration"
 
     - name: Kubeadm | Write new manifest for kubernetes control plane components
       command: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}"
