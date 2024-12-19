@@ -78,12 +78,12 @@
 - name: Kubeadm | Create reconfigure kubeadm config
   template:
     src: "cluster-configuration-replace.yaml.j2"
-    dest: "{{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+    dest: "{{ kube_reconfig_path }}"
     mode: "0640"
   tags: ['reconfigure-cluster']
 
 - name: Kubeadm | Create new configmap for ClusterConfiguration
-  command: "kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+  command: "kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_path }}"
   run_once: true
   when: first_master_node
   tags: ['reconfigure-cluster']
@@ -95,7 +95,7 @@
   block:
     - name: Kubeadm | Prepare ClusterConfiguration manifest
       lineinfile:
-        path: "{{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+        path: "{{ kube_reconfig_path }}"
         line: "{{ item }}"
         create: yes
         loop:
@@ -103,10 +103,10 @@
           - "kind: ClusterConfiguration"
 
     - name: Kubeadm | Write new manifest for kubernetes control plane components
-      command: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+      command: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}"
 
     - name: Kubeadm | Reconfigure local etcd
-      command: "kubeadm init phase etcd local --config {{ kube_reconfig_path }}/kubeadm-cluster-config-replace.yaml"
+      command: "kubeadm init phase etcd local --config {{ kube_reconfig_path }}"
 
     - name: Delete kube-apiserver pod
       command: "kubectl delete pod -n kube-system kube-apiserver-{{ ansible_hostname }}"
