@@ -5,6 +5,13 @@
 - name: Gather facts
   import_playbook: facts.yml
 
+- name: Include vars from `kubespray-defaults` main
+  hosts: kube_control_plane
+  run_once: true
+  ansible.builtin.include_vars:
+    depth: 1
+    dir: "{{ playbook_dir }}/../roles/kubespray-defaults"
+
 - name: Tasks for reconfigure control plane
   hosts: kube_control_plane
   gather_facts: false
