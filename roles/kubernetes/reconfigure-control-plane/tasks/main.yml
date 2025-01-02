@@ -2,15 +2,15 @@
 - name: Include vars from `kubespray-defaults`
   run_once: true
   ansible.builtin.include_vars:
-    dir: roles/kubespray-defaults/vars
+    dir: "{{ playbook_dir }}/roles/kubespray-defaults/vars"
 - name: Include vars from `kubernetes/control-plane` defaults
   run_once: true
   ansible.builtin.include_vars:
-    dir: roles/kubernetes/control-plane/defaults
+    dir: "{{ playbook_dir }}/roles/kubernetes/control-plane/defaults"
 - name: Include vars from `kubernetes/control-plane` vars
   run_once: true
   ansible.builtin.include_vars:
-    dir: roles/kubernetes/control-plane/vars
+    dir: "{{ playbook_dir }}/roles/kubernetes/control-plane/vars"
 
 - name: Ensure all nodes are in Ready state
   run_once: true
