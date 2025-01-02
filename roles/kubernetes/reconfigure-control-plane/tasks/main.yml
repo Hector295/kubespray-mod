@@ -2,7 +2,7 @@
 - name: Include vars from `kubespray-defaults` main
   run_once: true
   ansible.builtin.include_vars:
-    dir: "{{ playbook_dir }}/../roles/kubespray-defaults/main"
+    dir: "{{ playbook_dir }}/../roles/kubespray-defaults/defaults/main"
 - name: Include vars from `kubespray-defaults` vars
   run_once: true
   ansible.builtin.include_vars:
