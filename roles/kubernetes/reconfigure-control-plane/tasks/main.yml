@@ -1,4 +1,16 @@
 ---
+- name: Get variables from kubespray
+  run_once: true
+  tasks:
+      - name: Include vars from `kubespray-defaults`
+        ansible.builtin.include_vars:
+          dir: roles/kubespray-defaults/vars
+      - name: Include vars from `kubernetes/control-plane` defaults
+        ansible.builtin.include_vars:
+          dir: roles/kubernetes/control-plane/defaults
+      - name: Include vars from `kubernetes/control-plane` vars
+        ansible.builtin.include_vars:
+          dir: roles/kubernetes/control-plane/vars
 - name: Ensure all nodes are in Ready state
   run_once: true
   block:
@@ -30,7 +42,7 @@
   retries: 60
   delay: 5
   until: _result.status == 200
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
 
 - name: Check if kubeadm has already run
   stat:
@@ -39,7 +51,7 @@
     get_checksum: false
     get_mime: false
   register: kubeadm_already_run
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
 
 - name: Set reconfig path
   set_fact:
@@ -50,7 +62,7 @@
     path: "{{ kube_config_dir }}"
     dest: "{{ kube_config_dir }}/kubernetes-config-{{ ansible_date_time.date }}.tar.gz"
     format: gz
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
 
 - name: Create backup directory if it doesn't exist
   file:
@@ -59,7 +71,7 @@
     mode: '0755'
     owner: root
     group: root
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
 
 - name: Backup ConfigMap
   when: first_master_node
@@ -79,25 +91,25 @@
   register: cm_delete
   failed_when: cm_delete.rc != 0
 
-- name: Kubeadm | Create reconfigure kubeadm config
+- name: Create reconfigure kubeadm config
   template:
     src: "cluster-configuration-replace.yaml.j2"
     dest: "{{ kube_reconfig_path }}"
     mode: "0640"
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
 
-- name: Kubeadm | Create new configmap for ClusterConfiguration
+- name: Create new configmap for ClusterConfiguration
   command: "kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_path }}"
   run_once: true
   when: first_master_node
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
 
 - name: Reconfigure control-plane
   when:
     - kubeadm_already_run.stat.exists
-  tags: ['reconfigure-cluster']
+  tags: ['reconfigure-control-plane']
   block:
-    - name: Kubeadm | Prepare ClusterConfiguration manifest
+    - name: Prepare ClusterConfiguration manifest
       lineinfile:
         path: "{{ kube_reconfig_path }}"
         line: "{{ item }}"
@@ -106,10 +118,10 @@
         - "apiVersion: kubeadm.k8s.io/v1beta3"
         - "kind: ClusterConfiguration"
 
-    - name: Kubeadm | Write new manifest for kubernetes control plane components
+    - name: Write new manifest for kubernetes control plane components
       command: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}"
 
-    - name: Kubeadm | Reconfigure local etcd
+    - name: Reconfigure local etcd
       command: "kubeadm init phase etcd local --config {{ kube_reconfig_path }}"
 
     - name: Delete kube-apiserver pod
