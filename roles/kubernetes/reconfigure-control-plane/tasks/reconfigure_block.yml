@@ -1,4 +1,4 @@
--block:
+- block:
   - name: Prepare ClusterConfiguration manifest
     lineinfile:
       path: "{{ kube_reconfig_path }}"
@@ -46,3 +46,5 @@
     retries: 10
     delay: 30
     until: check_scheduler.stdout == 'Running'
+  delegate_to: "{{ cp_node }}"
+  when: kubeadm_already_run.stat.exists | default(false)

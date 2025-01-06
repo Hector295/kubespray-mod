@@ -102,6 +102,5 @@
   loop: "{{ groups['kube_control_plane'] }}"
   loop_control:
     loop_var: cp_node
-  delegate_to: "{{ cp_node }}"
   include_tasks: reconfigure_block.yml
 
