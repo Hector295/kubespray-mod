@@ -1,40 +1,39 @@
 ---
 - name: Ensure all nodes are in Ready state
-  run_once: true
+  when: inventory_hostname == first_master_node
   block:
-  - name: Get all node status
-    raw: "{{ bin_dir }}/kubectl get nodes --no-headers"
-    register: all_nodes_status
+    - name: Get all node status
+      raw: "{{ bin_dir }}/kubectl get nodes --no-headers"
+      register: all_nodes_status
 
-  - name: Get all node status different than Ready
-    raw: echo "{{ all_nodes_status.stdout }}" | grep -v ' Ready'
-    register: nodes_status
+    - name: Get all node status different than Ready
+      raw: echo "{{ all_nodes_status.stdout }}" | grep -v ' Ready'
+      register: nodes_status
 
-  - name: Show not ready nodes
-    debug: msg="{{ nodes_status.stdout_lines }}"
-    when: nodes_status.stdout != "\r\n"
+    - name: Show not ready nodes
+      debug: msg="{{ nodes_status.stdout_lines }}"
+      when: nodes_status.stdout != "\r\n"
 
-  - name: Confirm Reconfigure
-    pause:
-      prompt: "Some workers are not in Ready state. Type 'yes' to continue with reconfigure"
-    register: pause_result
-    when: nodes_status.stdout != "\r\n"
+    - name: Confirm Reconfigure
+      pause:
+        prompt: "Some workers are not in Ready state. Type 'yes' to continue with reconfigure"
+      register: pause_result
+      when: nodes_status.stdout != "\r\n"
 
-  - name: Fail if user does not confirm reconfigure
-    fail:
-      msg: "Reconfigure control pĺane will not continue"
-    when: pause_result.user_input | default('yes') != 'yes'
+    - name: Fail if user does not confirm reconfigure
+      fail:
+        msg: "Reconfigure control pĺane will not continue"
+      when: pause_result.user_input | default('yes') != 'yes'
 
 - name: Check API is up
   uri:
     url: "https://{{ ip | default(fallback_ips[inventory_hostname]) }}:{{ kube_apiserver_port }}/healthz"
     validate_certs: false
-  when: first_master_node
+  when: inventory_hostname == first_master_node
   register: _result
   retries: 60
   delay: 5
   until: _result.status == 200
-  tags: ['reconfigure-control-plane']
 
 - name: Check if kubeadm has already run
   stat:
@@ -43,7 +42,6 @@
     get_checksum: false
     get_mime: false
   register: kubeadm_already_run
-  tags: ['reconfigure-control-plane']
 
 - name: Set reconfig path
   set_fact:
@@ -54,7 +52,6 @@
     path: "{{ kube_config_dir }}"
     dest: "{{ kube_config_dir }}/kubernetes-config-{{ ansible_date_time.date }}.tar.gz"
     format: gz
-  tags: ['reconfigure-control-plane']
 
 - name: Create backup directory if it doesn't exist
   file:
@@ -63,21 +60,18 @@
     mode: '0755'
     owner: root
     group: root
-  tags: ['reconfigure-control-plane']
 
 - name: Backup ConfigMap
-  when: first_master_node
-  run_once: true
-  raw:  "{{ bin_dir }}/kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_path }}"
-  become: yes
+  when: inventory_hostname == first_master_node
+  raw: "{{ bin_dir }}/kubectl get cm -n {{ cm_namespace }} {{ cm_name }} -o yaml > {{ kube_reconfig_path }}"
+  become: true
   register: cm_backup
   failed_when: cm_backup.rc != 0
 
 - name: Delete ConfigMap
-  when: first_master_node and cm_backup.rc == 0
-  run_once: true
+  when: inventory_hostname == first_master_node and cm_backup.rc == 0
   raw: "{{ bin_dir }}/kubectl delete cm -n {{ cm_namespace }} {{ cm_name }}"
-  become: yes
+  become: true
   register: cm_delete
   failed_when: cm_delete.rc != 0
 
@@ -86,21 +80,58 @@
     src: "cluster-configuration-replace.yaml.j2"
     dest: "{{ kube_reconfig_path }}"
     mode: "0640"
-  tags: ['reconfigure-control-plane']
 
 - name: Create new configmap for ClusterConfiguration
   raw: "{{ bin_dir }}/kubectl create configmap -n {{ cm_namespace }} {{ cm_name }} --from-file=ClusterConfiguration={{ kube_reconfig_path }}"
-  run_once: true
-  when: first_master_node
-  tags: ['reconfigure-control-plane']
+  when: inventory_hostname == first_master_node
 
 - name: Reconfigure control-plane
-  when:
-    - kubeadm_already_run.stat.exists
-  run_once: true
-  # We'll iterate over each node in the kube_control_plane group:
-  loop: "{{ groups['kube_control_plane'] }}"
-  loop_control:
-    loop_var: cp_node
-  include_tasks: reconfigure_block.yml
+  when: kubeadm_already_run.stat.exists
+  block:
+    - name: Prepare ClusterConfiguration manifest
+      lineinfile:
+        path: "{{ kube_reconfig_path }}"
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "apiVersion: kubeadm.k8s.io/v1beta3"
+        - "kind: ClusterConfiguration"
 
+    - name: Write new manifest for kubernetes control plane components
+      raw: "kubeadm init phase control-plane all --config {{ kube_reconfig_path }}"
+
+    - name: Reconfigure local etcd
+      raw: "kubeadm init phase etcd local --config {{ kube_reconfig_path }}"
+
+    - name: Delete kube-apiserver pod
+      raw: "{{ bin_dir }}/kubectl delete pod -n kube-system kube-apiserver-{{ ansible_hostname }}"
+      ignore_errors: true
+
+    - name: Wait for kube-apiserver pod to be running
+      raw: "{{ bin_dir }}/kubectl get pod -n kube-system kube-apiserver-{{ ansible_hostname }} -o jsonpath='{.status.phase}'"
+      register: check_apiserver
+      retries: 10
+      delay: 30
+      until: check_apiserver.stdout == 'Running'
+
+    - name: Delete kube-controller-manager pod
+      raw: "{{ bin_dir }}/kubectl delete pod -n kube-system kube-controller-manager-{{ ansible_hostname }}"
+      ignore_errors: true
+
+    - name: Wait for kube-controller-manager pod to be running
+      raw: "{{ bin_dir }}/kubectl get pod -n kube-system kube-controller-manager-{{ ansible_hostname }} -o jsonpath='{.status.phase}'"
+      register: check_controller_manager
+      retries: 10
+      delay: 30
+      until: check_controller_manager.stdout == 'Running'
+
+    - name: Delete kube-scheduler pod
+      raw: "{{ bin_dir }}/kubectl delete pod -n kube-system kube-scheduler-{{ ansible_hostname }}"
+      ignore_errors: true
+
+    - name: Wait for kube-scheduler pod to be running
+      raw: "{{ bin_dir }}/kubectl get pod -n kube-system kube-scheduler-{{ ansible_hostname }} -o jsonpath='{.status.phase}'"
+      register: check_scheduler
+      retries: 10
+      delay: 30
+      until: check_scheduler.stdout == 'Running'
